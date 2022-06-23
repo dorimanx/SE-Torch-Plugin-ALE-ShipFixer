@@ -6,10 +6,12 @@ using Sandbox.ModAPI;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using VRage;
 using VRage.Game;
 using VRage.Game.Entity;
 using VRage.Game.ModAPI;
 using VRage.Groups;
+using VRage.ModAPI;
 using VRage.ObjectBuilders;
 using VRageMath;
 using IMyShipController = Sandbox.ModAPI.IMyShipController;
@@ -20,6 +22,8 @@ namespace ALE_ShipFixer {
 
         public static readonly Logger Log = LogManager.GetCurrentClassLogger();
         public static ShipFixerCore Instance;
+        private readonly FastResourceLock m_lock = new FastResourceLock();
+        private bool BusyAlready = false;
 
         public static void Init() {
             Instance = new ShipFixerCore();
@@ -193,89 +197,132 @@ namespace ALE_ShipFixer {
 
         private CheckResult FixGroup(List<MyCubeGrid> GridGroups, MyIdentity executingPlayer) {
 
-            string playerName = "Server";
+            using (m_lock.AcquireExclusiveUsing()) {
 
-            if (executingPlayer != null)
-                playerName = executingPlayer.DisplayName;
+                string playerName = "Server";
+                var GridSizeForParallel = false;
+                BusyAlready = true;
 
-            List<MyObjectBuilder_EntityBase> objectBuilderList = new List<MyObjectBuilder_EntityBase>();
-            List<MyCubeGrid> gridsList = new List<MyCubeGrid>();
+                if (executingPlayer != null)
+                    playerName = executingPlayer.DisplayName;
 
-            foreach (var grid in GridGroups) {
+                List<MyObjectBuilder_EntityBase> objectBuilderList = new List<MyObjectBuilder_EntityBase>();
+                List<MyCubeGrid> gridsList = new List<MyCubeGrid>();
 
-                gridsList.Add(grid);
-                grid.Physics.ClearSpeed();
-                MyObjectBuilder_EntityBase ob = grid.GetObjectBuilder(true);
+                foreach (var grid in GridGroups) {
 
-                if (ob is MyObjectBuilder_CubeGrid gridBuilder) {
-                    foreach (MyObjectBuilder_CubeBlock cubeBlock in gridBuilder.CubeBlocks) {
+                    gridsList.Add(grid);
+                    grid.Physics.ClearSpeed();
+                    MyObjectBuilder_EntityBase ob = grid.GetObjectBuilder(true);
 
-                        if (cubeBlock is MyObjectBuilder_ProjectorBase projector) {
-                                
-                            projector.Enabled = false;
+                    if (ob is MyObjectBuilder_CubeGrid gridBuilder) {
 
-                            if (ShipFixerPlugin.Instance.Config.RemoveBlueprintsFromProjectors)
-                                projector.ProjectedGrids = null;
+                        foreach (MyObjectBuilder_CubeBlock cubeBlock in gridBuilder.CubeBlocks) {
+
+                            if (cubeBlock is MyObjectBuilder_ProjectorBase projector) {
+
+                                projector.Enabled = false;
+
+                                if (ShipFixerPlugin.Instance.Config.RemoveBlueprintsFromProjectors)
+                                    projector.ProjectedGrids = null;
+                            }
+
+                            if (cubeBlock is MyObjectBuilder_OxygenTank o2Tank)
+                                o2Tank.AutoRefill = false;
                         }
-
-                        if (cubeBlock is MyObjectBuilder_OxygenTank o2Tank)
-                            o2Tank.AutoRefill = false;
                     }
+
+                    objectBuilderList.Add(ob);
                 }
 
-                objectBuilderList.Add(ob);
-            }
+                foreach (MyCubeGrid grid in gridsList) {
 
-            foreach (MyCubeGrid grid in gridsList) {
+                    Log.Warn("Player " + playerName + " used ShipFixerPlugin on Grid " + grid.DisplayName + " for cut & paste!");
 
-                Log.Warn("Player " + playerName + " used ShipFixerPlugin on Grid " + grid.DisplayName + " for cut & paste!");
+                    if (grid.BlocksCount > 10)
+                        GridSizeForParallel = true;
 
-                grid.Close();
-            }
+                    grid.Close();
+                }
 
-            MyAPIGateway.Entities.RemapObjectBuilderCollection(objectBuilderList);
-            var NewMyEntityList = new List<MyEntity>();
-            var GridsCount = objectBuilderList.Count;
-            var GridsCreated = 0;
+                MyAPIGateway.Entities.RemapObjectBuilderCollection(objectBuilderList);
+                var NewMyEntityList = new List<MyEntity>();
+                var SubgridsList = new List<IMyEntity>();
+                var GridsCount = objectBuilderList.Count;
+                var GridsCreated = 0;
 
-            foreach (var ObGrid in objectBuilderList) {
+                foreach (var EntityObGrid in objectBuilderList) {
 
-                MyEntities.CreateFromObjectBuilderParallel(ObGrid, false, delegate (MyEntity grid) {
+                    if (((MyObjectBuilder_CubeGrid)EntityObGrid).CubeBlocks.Count() < 10) {
 
-                    var NewGrid = (MyCubeGrid)grid;
+                        var NewEntity = MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(EntityObGrid);
 
-                    if (grid.Physics != null) {
+                        if (NewEntity.Physics != null && GridsCount > 1 && GridSizeForParallel) {
 
-                        grid.Physics.Gravity = Vector3.Zero;
-                        grid.Physics.ClearSpeed();
-                        grid.Physics.Deactivate();
-                    }
-
-                    NewGrid.DetectDisconnectsAfterFrame();
-                    NewMyEntityList.Add(grid);
-                    ++GridsCreated;
-
-                    if (GridsCount == GridsCreated) {
-
-                        NewMyEntityList.Reverse();
-
-                        foreach (var ReadyGrid in NewMyEntityList) {
-
-                            MyEntities.Add(ReadyGrid, true);
-
-                            if (ReadyGrid.Physics != null) {
-
-                                var GridGavity = (MyCubeGrid)ReadyGrid;
-                                ReadyGrid.Physics.Activate();
-                                ReadyGrid.Physics.Gravity = Vector3.Zero;
-                                GridGavity.Physics.DisableGravity = 2;
-                            }
+                            NewEntity.Physics.Gravity = Vector3.Zero;
+                            NewEntity.Physics.ClearSpeed();
+                            NewEntity.Physics.Deactivate();
+                            SubgridsList.Add(NewEntity);
+                            GridsCount--;
                         }
+                    } else {
+
+                        MyEntities.CreateFromObjectBuilderParallel(EntityObGrid, false, delegate (MyEntity grid) {
+
+                            var NewGrid = (MyCubeGrid)grid;
+
+                            if (grid.Physics != null) {
+
+                                grid.Physics.Gravity = Vector3.Zero;
+                                grid.Physics.ClearSpeed();
+                                grid.Physics.Deactivate();
+                            }
+
+                            NewGrid.DetectDisconnectsAfterFrame();
+                            NewMyEntityList.Add(grid);
+                            ++GridsCreated;
+
+                            if (GridsCount == GridsCreated) {
+
+                                NewMyEntityList.Reverse();
+
+                                foreach (var ReadyGrid in NewMyEntityList) {
+
+                                    MyEntities.Add(ReadyGrid, true);
+
+                                    if (ReadyGrid.Physics != null) {
+
+                                        var GridGavity = (MyCubeGrid)ReadyGrid;
+                                        ReadyGrid.Physics.Activate();
+                                        ReadyGrid.Physics.Gravity = Vector3.Zero;
+                                        GridGavity.Physics.DisableGravity = 2;
+                                    }
+                                }
+
+                                if (SubgridsList.Count > 0) {
+
+                                    foreach (var SubGrid in SubgridsList) {
+
+                                        if (SubGrid.Physics != null) {
+
+                                            var SubGridGavity = (MyCubeGrid)SubGrid;
+                                            SubGrid.Physics.Activate();
+                                            SubGrid.Physics.Gravity = Vector3.Zero;
+                                            SubGridGavity.Physics.DisableGravity = 2;
+                                        }
+                                    }
+                                }
+                            }
+                        });
                     }
-                });
+                }
+                BusyAlready = false;
             }
 
-            return CheckResult.SHIP_FIXED;
+            if (BusyAlready)
+                return CheckResult.BUSY_NOW_TRY_AGAIN;
+            else
+                return CheckResult.SHIP_FIXED;
         }
 
         public static List<MyCubeGrid> FindLookAtGridGroup(IMyCharacter controlledEntity, long playerId, out CheckResult result) {

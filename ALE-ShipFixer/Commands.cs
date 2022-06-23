@@ -305,6 +305,10 @@ namespace ALE_ShipFixer {
                 case CheckResult.GRID_NOT_FOUND:
                     Context.Respond("Grid not found");
                     break;
+
+                case CheckResult.BUSY_NOW_TRY_AGAIN:
+                    Context.Respond("Fixing Ship for other player try again in 10sec");
+                    break;
             }
         }
     }

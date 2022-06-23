@@ -9,5 +9,6 @@
         GRID_OCCUPIED,
         SHIP_FIXED,
         GRID_NOT_FOUND,
+        BUSY_NOW_TRY_AGAIN,
     }
 }
