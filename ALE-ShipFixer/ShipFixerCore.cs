@@ -239,7 +239,7 @@ namespace ALE_ShipFixer {
 
                     Log.Warn("Player " + playerName + " used ShipFixerPlugin on Grid " + grid.DisplayName + " for cut & paste!");
 
-                    if (grid.BlocksCount > 10)
+                    if (grid.BlocksCount >= 200)
                         GridSizeForParallel = true;
 
                     grid.Close();
@@ -253,7 +253,7 @@ namespace ALE_ShipFixer {
 
                 foreach (var EntityObGrid in objectBuilderList) {
 
-                    if (((MyObjectBuilder_CubeGrid)EntityObGrid).CubeBlocks.Count() < 10) {
+                    if (((MyObjectBuilder_CubeGrid)EntityObGrid).CubeBlocks.Count() <= 200) {
 
                         var NewEntity = MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(EntityObGrid);
 
