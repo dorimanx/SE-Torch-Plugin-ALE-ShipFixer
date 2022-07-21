@@ -259,9 +259,7 @@ namespace ALE_ShipFixer {
 
                         if (NewEntity.Physics != null && GridsCount > 1 && GridSizeForParallel) {
 
-                            NewEntity.Physics.Gravity = Vector3.Zero;
-                            NewEntity.Physics.ClearSpeed();
-                            NewEntity.Physics.Deactivate();
+                            GravitySubGrid(NewEntity, false);
                             SubgridsList.Add(NewEntity);
                             GridsCount--;
                         }
@@ -271,12 +269,8 @@ namespace ALE_ShipFixer {
 
                             var NewGrid = (MyCubeGrid)grid;
 
-                            if (grid.Physics != null) {
-
-                                grid.Physics.Gravity = Vector3.Zero;
-                                grid.Physics.ClearSpeed();
-                                grid.Physics.Deactivate();
-                            }
+                            if (grid.Physics != null)
+                                GravityMainGrid(grid, false);
 
                             NewGrid.DetectDisconnectsAfterFrame();
                             NewMyEntityList.Add(grid);
@@ -290,26 +284,16 @@ namespace ALE_ShipFixer {
 
                                     MyEntities.Add(ReadyGrid, true);
 
-                                    if (ReadyGrid.Physics != null) {
-
-                                        var GridGavity = (MyCubeGrid)ReadyGrid;
-                                        ReadyGrid.Physics.Activate();
-                                        ReadyGrid.Physics.Gravity = Vector3.Zero;
-                                        GridGavity.Physics.DisableGravity = 2;
-                                    }
+                                    if (ReadyGrid.Physics != null)
+                                        GravityMainGrid(ReadyGrid, true);
                                 }
 
                                 if (SubgridsList.Count > 0) {
 
                                     foreach (var SubGrid in SubgridsList) {
 
-                                        if (SubGrid.Physics != null) {
-
-                                            var SubGridGavity = (MyCubeGrid)SubGrid;
-                                            SubGrid.Physics.Activate();
-                                            SubGrid.Physics.Gravity = Vector3.Zero;
-                                            SubGridGavity.Physics.DisableGravity = 2;
-                                        }
+                                        if (SubGrid.Physics != null)
+                                            GravitySubGrid(SubGrid, true);
                                     }
                                 }
                             }
@@ -323,6 +307,60 @@ namespace ALE_ShipFixer {
                 return CheckResult.BUSY_NOW_TRY_AGAIN;
             else
                 return CheckResult.SHIP_FIXED;
+        }
+
+        private static void GravityMainGrid(MyEntity grid, bool State)
+        {
+            try {
+                if (!State) {
+
+                    MyAPIGateway.Utilities.InvokeOnGameThread(() => {
+
+                        grid.Physics.Gravity = Vector3.Zero;
+                        grid.Physics.ClearSpeed();
+                        grid.Physics.Deactivate();
+                    });
+                }
+
+                if (State) {
+
+                    MyAPIGateway.Utilities.InvokeOnGameThread(() => {
+
+                        var GridGavity = (MyCubeGrid)grid;
+                        grid.Physics.Activate();
+                        grid.Physics.Gravity = Vector3.Zero;
+                        GridGavity.Physics.DisableGravity = 2;
+                    });
+                }
+            }
+            catch { };
+        }
+
+        private static void GravitySubGrid(IMyEntity SubGrid, bool State)
+        {
+            try {
+                if (!State) {
+
+                    MyAPIGateway.Utilities.InvokeOnGameThread(() => {
+
+                        SubGrid.Physics.Gravity = Vector3.Zero;
+                        SubGrid.Physics.ClearSpeed();
+                        SubGrid.Physics.Deactivate();
+                    });
+                }
+
+                if (State) {
+
+                    MyAPIGateway.Utilities.InvokeOnGameThread(() => {
+
+                        var SubGridGavity = (MyCubeGrid)SubGrid;
+                        SubGrid.Physics.Activate();
+                        SubGrid.Physics.Gravity = Vector3.Zero;
+                        SubGridGavity.Physics.DisableGravity = 2;
+                    });
+                }
+            }
+            catch { };
         }
 
         public static List<MyCubeGrid> FindLookAtGridGroup(IMyCharacter controlledEntity, long playerId, out CheckResult result) {
